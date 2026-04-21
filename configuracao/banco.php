@@ -1,4 +1,3 @@
-
 <?php
 
 /*
@@ -26,11 +25,10 @@ class Banco {
             $this->senha = "";
         } else {
             // Configurações de Produção (InfinityFree)
-            // IMPORTANTE: Preencha aqui com os dados do painel do InfinityFree
-            $this->host = "sql306.infinityfree.com"; // Veja no Painel > MySQL Databases
-            $this->dbname = "if0_41696045_scambus_db"; // Nome que você criou no painel
-            $this->usuario = "if0_41696045";       // Seu usuário do painel
-            $this->senha = "Artur191236";        // Mesma senha da conta
+            $this->host = "sql306.infinityfree.com";
+            $this->dbname = "if0_41696045_scambus_db";
+            $this->usuario = "if0_41696045";
+            $this->senha = "Artur191236";
         }
     }
 
@@ -44,8 +42,10 @@ class Banco {
                 $this->senha
             );
 
-            // Faz o PDO mostrar erros caso aconteçam
             $conexao->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+            // ✅ NOVO: Definir timezone por sessão (funciona em hospedagem grátis)
+            $conexao->query("SET time_zone = '-03:00'");
 
             return $conexao;
 
@@ -53,7 +53,46 @@ class Banco {
 
             error_log("Scambus DB Error: " . $erro->getMessage());
             http_response_code(500);
-            echo "<!DOCTYPE html><html lang='pt-BR'><head><meta charset='UTF-8'><title>Erro</title></head><body style='font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f9fafb'><div style='text-align:center;padding:2rem'><h2 style='color:#dc2626'>⚠️ Erro Interno</h2><p style='color:#6b7280'>Não foi possível conectar ao banco de dados. Tente novamente em instantes.</p></div></body></html>";
+            echo "<!DOCTYPE html>
+<html lang='pt-BR'>
+<head>
+    <meta charset='UTF-8'>
+    <title>Erro de Conexão</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            text-align: center;
+            max-width: 400px;
+        }
+        h2 {
+            color: #dc2626;
+            margin: 0 0 1rem 0;
+        }
+        p {
+            color: #6b7280;
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <h2>⚠️ Erro Interno</h2>
+        <p>Não foi possível conectar ao banco de dados. Tente novamente em instantes.</p>
+    </div>
+</body>
+</html>";
             exit;
 
         }

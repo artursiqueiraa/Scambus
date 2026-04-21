@@ -12,22 +12,22 @@ class Comunidade {
     }
 
     // ─── POSTS ───────────────────────────────────────────
-public function criarPost($usuario_id, $texto, $imagem = null, $video = null, $servico_id = null, $tipo_post = 'DICA'){
+    public function criarPost($usuario_id, $texto, $imagem = null, $video = null, $servico_id = null, $tipo_post = 'DICA'){
 
-    $sql = "INSERT INTO comunidade_posts (usuario_id, texto, imagem, video, servico_id, tipo_post)
-            VALUES (:usuario_id, :texto, :imagem, :video, :servico_id, :tipo_post)";
+        $sql = "INSERT INTO comunidade_posts (usuario_id, texto, imagem, video, servico_id, tipo_post)
+                VALUES (:usuario_id, :texto, :imagem, :video, :servico_id, :tipo_post)";
 
-    $stmt = $this->conexao->prepare($sql);
-    $stmt->bindParam(":usuario_id", $usuario_id);
-    $stmt->bindParam(":texto",      $texto);
-    $stmt->bindParam(":imagem",     $imagem);
-    $stmt->bindParam(":video",      $video);
-    $stmt->bindParam(":servico_id", $servico_id);
-    $stmt->bindParam(":tipo_post",  $tipo_post);
-    $stmt->execute();
+        $stmt = $this->conexao->prepare($sql);
+        $stmt->bindParam(":usuario_id", $usuario_id);
+        $stmt->bindParam(":texto",      $texto);
+        $stmt->bindParam(":imagem",     $imagem);
+        $stmt->bindParam(":video",      $video);
+        $stmt->bindParam(":servico_id", $servico_id);
+        $stmt->bindParam(":tipo_post",  $tipo_post);
+        $stmt->execute();
 
-    return $this->conexao->lastInsertId();
-}
+        return $this->conexao->lastInsertId();
+    }
 
     public function listarPosts($tipo = null, $usuario_id_logado = null){
 
@@ -79,7 +79,7 @@ public function criarPost($usuario_id, $texto, $imagem = null, $video = null, $s
                 LIMIT 1";
 
         $stmt = $this->conexao->prepare($sql);
-        $stmt->bindParam(":id", $id);
+        $stmt->bindParam(":id", $id, PDO::PARAM_INT);
         $stmt->execute();
 
         return $stmt->fetch(PDO::FETCH_ASSOC);
@@ -94,8 +94,8 @@ public function criarPost($usuario_id, $texto, $imagem = null, $video = null, $s
                 WHERE post_id = :post AND usuario_id = :usuario";
 
         $stmt = $this->conexao->prepare($sql);
-        $stmt->bindParam(":post",    $post_id);
-        $stmt->bindParam(":usuario", $usuario_id);
+        $stmt->bindParam(":post",    $post_id, PDO::PARAM_INT);
+        $stmt->bindParam(":usuario", $usuario_id, PDO::PARAM_INT);
         $stmt->execute();
 
         $existe = $stmt->fetch();
@@ -109,8 +109,8 @@ public function criarPost($usuario_id, $texto, $imagem = null, $video = null, $s
         }
 
         $stmt = $this->conexao->prepare($sql);
-        $stmt->bindParam(":post",    $post_id);
-        $stmt->bindParam(":usuario", $usuario_id);
+        $stmt->bindParam(":post",    $post_id, PDO::PARAM_INT);
+        $stmt->bindParam(":usuario", $usuario_id, PDO::PARAM_INT);
         $stmt->execute();
     }
 
@@ -120,11 +120,21 @@ public function criarPost($usuario_id, $texto, $imagem = null, $video = null, $s
                 WHERE post_id = :post AND usuario_id = :usuario";
 
         $stmt = $this->conexao->prepare($sql);
-        $stmt->bindParam(":post",    $post_id);
-        $stmt->bindParam(":usuario", $usuario_id);
+        $stmt->bindParam(":post",    $post_id, PDO::PARAM_INT);
+        $stmt->bindParam(":usuario", $usuario_id, PDO::PARAM_INT);
         $stmt->execute();
 
         return $stmt->fetch() ? true : false;
+    }
+
+    // ✅ NOVO: Contar curtidas por post (faltava!)
+    public function contarCurtidas($post_id) {
+        $sql = "SELECT COUNT(*) as total FROM comunidade_curtidas WHERE post_id = :id";
+        $stmt = $this->conexao->prepare($sql);
+        $stmt->bindParam(":id", $post_id, PDO::PARAM_INT);
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return (int)($row['total'] ?? 0);
     }
 
     // ─── COMENTÁRIOS ──────────────────────────────────────
@@ -135,8 +145,8 @@ public function criarPost($usuario_id, $texto, $imagem = null, $video = null, $s
                 VALUES (:post, :usuario, :texto)";
 
         $stmt = $this->conexao->prepare($sql);
-        $stmt->bindParam(":post",    $post_id);
-        $stmt->bindParam(":usuario", $usuario_id);
+        $stmt->bindParam(":post",    $post_id, PDO::PARAM_INT);
+        $stmt->bindParam(":usuario", $usuario_id, PDO::PARAM_INT);
         $stmt->bindParam(":texto",   $texto);
         $stmt->execute();
     }
@@ -153,7 +163,7 @@ public function criarPost($usuario_id, $texto, $imagem = null, $video = null, $s
                 ORDER BY cm.data_criacao ASC";
 
         $stmt = $this->conexao->prepare($sql);
-        $stmt->bindParam(":post", $post_id);
+        $stmt->bindParam(":post", $post_id, PDO::PARAM_INT);
         $stmt->execute();
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -163,45 +173,58 @@ public function criarPost($usuario_id, $texto, $imagem = null, $video = null, $s
 
     public function editarPost($post_id, $usuario_id, $texto){
 
+        // ✅ VALIDAÇÃO: Verifica se post existe e pertence ao usuário
+        $verificacao = $this->buscarPostPorId($post_id);
+        if (!$verificacao || $verificacao['usuario_id'] != $usuario_id) {
+            error_log("Tentativa de editar post #{$post_id} por usuário #{$usuario_id} (não permitido)");
+            return false;
+        }
+
         $sql = "UPDATE comunidade_posts SET texto = :texto
                 WHERE id = :id AND usuario_id = :usuario";
 
         $stmt = $this->conexao->prepare($sql);
         $stmt->bindParam(":texto",   $texto);
-        $stmt->bindParam(":id",      $post_id);
-        $stmt->bindParam(":usuario", $usuario_id);
+        $stmt->bindParam(":id",      $post_id, PDO::PARAM_INT);
+        $stmt->bindParam(":usuario", $usuario_id, PDO::PARAM_INT);
         $stmt->execute();
+
+        return true;
     }
 
     public function excluirPost($post_id, $usuario_id){
 
-        // Exclui curtidas do post
-        $sql = "DELETE FROM comunidade_curtidas WHERE post_id = :id";
-        $stmt = $this->conexao->prepare($sql);
-        $stmt->bindParam(":id", $post_id);
-        $stmt->execute();
+        // ✅ VALIDAÇÃO: Verifica se post existe e pertence ao usuário
+        $verificacao = $this->buscarPostPorId($post_id);
+        if (!$verificacao || $verificacao['usuario_id'] != $usuario_id) {
+            error_log("Tentativa de deletar post #{$post_id} por usuário #{$usuario_id} (não permitido)");
+            return false;
+        }
 
-        // Exclui comentários do post
-        $sql = "DELETE FROM comunidade_comentarios WHERE post_id = :id";
-        $stmt = $this->conexao->prepare($sql);
-        $stmt->bindParam(":id", $post_id);
-        $stmt->execute();
+        try {
+            // Exclui curtidas do post
+            $sql = "DELETE FROM comunidade_curtidas WHERE post_id = :id";
+            $stmt = $this->conexao->prepare($sql);
+            $stmt->bindParam(":id", $post_id, PDO::PARAM_INT);
+            $stmt->execute();
 
-        // Exclui o post (somente se for do próprio usuário)
-        $sql = "DELETE FROM comunidade_posts WHERE id = :id AND usuario_id = :usuario";
-        $stmt = $this->conexao->prepare($sql);
-        $stmt->bindParam(":id",      $post_id);
-        $stmt->bindParam(":usuario", $usuario_id);
-        $stmt->execute();
-    }
+            // Exclui comentários do post
+            $sql = "DELETE FROM comunidade_comentarios WHERE post_id = :id";
+            $stmt = $this->conexao->prepare($sql);
+            $stmt->bindParam(":id", $post_id, PDO::PARAM_INT);
+            $stmt->execute();
 
-    // ─── CONTAR CURTIDAS ─────────────────────────────────────────
-    public function contarCurtidas($post_id) {
-        $sql = "SELECT COUNT(*) as total FROM comunidade_curtidas WHERE post_id = :id";
-        $stmt = $this->conexao->prepare($sql);
-        $stmt->bindParam(":id", $post_id, PDO::PARAM_INT);
-        $stmt->execute();
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        return (int)($row['total'] ?? 0);
+            // Exclui o post
+            $sql = "DELETE FROM comunidade_posts WHERE id = :id";
+            $stmt = $this->conexao->prepare($sql);
+            $stmt->bindParam(":id", $post_id, PDO::PARAM_INT);
+            $stmt->execute();
+
+            return true;
+
+        } catch (Exception $e) {
+            error_log("Erro ao deletar post #{$post_id}: " . $e->getMessage());
+            return false;
+        }
     }
 }

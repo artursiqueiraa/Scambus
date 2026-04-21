@@ -7,14 +7,9 @@ require_once "../app/modelos/Servico.php";
 class ControladorTroca extends Controlador {
 
     /* ============================
-       VERIFICAR LOGIN (segurança)
-    ============================ */
-    // A proteção é feita via $this->auth() nos métodos.
-
-    /* ============================
        MINHAS TROCAS
     ============================ */
-        public function minhas(){
+    public function minhas(){
 
         $this->auth();
 
@@ -31,7 +26,7 @@ class ControladorTroca extends Controlador {
     /* ============================
        PROPOR TROCA (com Escrow)
     ============================ */
-        public function propor($servico_id){
+    public function propor($servico_id){
 
         $this->auth();
 
@@ -45,43 +40,37 @@ class ControladorTroca extends Controlador {
 
         if(!$servico){
             $_SESSION['erro_flash'] = 'Serviço não encontrado.';
-            header("Location: ?url=servico/listar");
-            exit;
+            $this->redirect('servico/listar');
+            return;
         }
 
-        // Anti-fraude: Não pode propor troca consigo mesmo
         if($servico['usuario_id'] == $usuario_id){
             $_SESSION['erro_flash'] = 'Você não pode propor troca para seu próprio serviço.';
-            header("Location: ?url=servico/ver/" . $servico_id);
-            exit;
+            $this->redirect('servico/ver/' . $servico_id);
+            return;
         }
 
-        // Anti-fraude: Limite de 10 propostas por dia
         $trocaModel = new Troca();
         $trocasHoje = $trocaModel->contarTrocasHoje($usuario_id);
         if($trocasHoje >= 10){
             $_SESSION['erro_flash'] = 'Você atingiu o limite de 10 propostas de troca por dia.';
-            header("Location: ?url=servico/ver/" . $servico_id);
-            exit;
+            $this->redirect('servico/ver/' . $servico_id);
+            return;
         }
 
-        // Definir valor de SCoins da troca
         $valor_scoins = isset($servico['valor_scoins']) ? (float)$servico['valor_scoins'] : 10;
 
-        // Escrow: Verificar e bloquear saldo
         if($valor_scoins > 0){
             $scoinModel = new Scoin();
-
             $saldoDisponivel = $scoinModel->saldoDisponivel($usuario_id);
 
             if($saldoDisponivel < $valor_scoins){
-                $_SESSION['erro_flash'] = 'Saldo insuficiente de SCoins. Disponível: ' . number_format($saldoDisponivel, 0) . ' | Necessário: ' . number_format($valor_scoins, 0) . '. Complete seu perfil ou receba gorjetas para ganhar mais SCoins.';
-                header("Location: ?url=servico/ver/" . $servico_id);
-                exit;
+                $_SESSION['erro_flash'] = 'Saldo insuficiente de SCoins. Disponível: ' . number_format($saldoDisponivel, 0) . ' | Necessário: ' . number_format($valor_scoins, 0);
+                $this->redirect('servico/ver/' . $servico_id);
+                return;
             }
         }
 
-        // Criar troca
         $troca_id = $trocaModel->criar(
             $servico_id,
             $usuario_id,
@@ -89,25 +78,23 @@ class ControladorTroca extends Controlador {
             $valor_scoins
         );
 
-        // Bloquear SCoins (escrow)
         if($valor_scoins > 0){
             $scoinModel->bloquear($usuario_id, $troca_id, $valor_scoins);
         }
 
-        // Notificar o destinatário
         $notificacao = new Notificacao();
         $mensagem = "Nova proposta de troca no seu serviço: " . $servico['titulo'];
         $link = "?url=troca/chat/" . $troca_id;
         $notificacao->criar($servico['usuario_id'], $mensagem, $link);
 
-        header("Location: ?url=troca/minhas");
-        exit;
+        $_SESSION['sucesso_flash'] = 'Proposta de troca enviada! 🎉';
+        $this->redirect('troca/minhas');
     }
 
     /* ============================
-       ACEITAR TROCA (NOVO)
+       ACEITAR TROCA
     ============================ */
-        public function aceitar($troca_id){
+    public function aceitar($troca_id){
 
         $this->auth();
 
@@ -119,7 +106,6 @@ class ControladorTroca extends Controlador {
         $resultado = $trocaModel->aceitar($troca_id, $usuario_id);
 
         if($resultado){
-            // Notificar o proponente
             $troca = $trocaModel->buscarPorId($troca_id);
             $notificacao = new Notificacao();
             $notificacao->criar(
@@ -127,16 +113,16 @@ class ControladorTroca extends Controlador {
                 "Sua proposta de troca foi aceita! Negocie os detalhes no chat.",
                 "?url=troca/chat/" . $troca_id
             );
+            $_SESSION['sucesso_flash'] = 'Proposta aceita! 👍';
         }
 
-        header("Location: ?url=troca/chat/" . $troca_id);
-        exit;
+        $this->redirect('troca/chat/' . $troca_id);
     }
 
     /* ============================
-       CANCELAR TROCA (NOVO, com devolução de SCoins)
+       CANCELAR TROCA
     ============================ */
-        public function cancelar($troca_id){
+    public function cancelar($troca_id){
 
         $this->auth();
 
@@ -149,14 +135,12 @@ class ControladorTroca extends Controlador {
         $troca = $trocaModel->cancelar($troca_id, $usuario_id);
 
         if($troca){
-            // Devolver SCoins bloqueados ao proponente (origem)
             $valor = (float)($troca['valor_scoins'] ?? 0);
             if($valor > 0){
                 $scoinModel = new Scoin();
                 $scoinModel->desbloquear($troca['usuario_origem_id'], $troca_id, $valor);
             }
 
-            // Notificar a outra parte
             $notificacao = new Notificacao();
             $outraParte = ($troca['usuario_origem_id'] == $usuario_id) 
                 ? $troca['usuario_destino_id'] 
@@ -166,16 +150,16 @@ class ControladorTroca extends Controlador {
                 "Uma troca foi cancelada.",
                 "?url=troca/minhas"
             );
+            $_SESSION['sucesso_flash'] = 'Troca cancelada! ❌';
         }
 
-        header("Location: ?url=troca/minhas");
-        exit;
+        $this->redirect('troca/minhas');
     }
 
     /* ============================
        CHAT
     ============================ */
-        public function chat($troca_id){
+    public function chat($troca_id){
 
         $this->auth();
 
@@ -184,7 +168,6 @@ class ControladorTroca extends Controlador {
         $trocaModel = new Troca();
         $troca = $trocaModel->buscarPorId($troca_id);
 
-        // Segurança
         if(!$troca){
             echo "Troca não encontrada.";
             return;
@@ -198,11 +181,9 @@ class ControladorTroca extends Controlador {
             return;
         }
 
-        // Buscar serviço
         $servicoModel = new Servico();
         $servico = $servicoModel->buscarPorId($troca['servico_id']);
 
-        // Mensagens
         $mensagemModel = new Mensagem();
         $mensagens = $mensagemModel->listarPorTroca($troca_id);
 
@@ -214,7 +195,7 @@ class ControladorTroca extends Controlador {
     /* ============================
        ENVIAR MENSAGEM
     ============================ */
-        public function enviarMensagem(){
+    public function enviarMensagem(){
 
         $this->auth();
         
@@ -222,8 +203,8 @@ class ControladorTroca extends Controlador {
             require_once "../nucleo/Seguranca.php";
             if(!Seguranca::validarCsrf($_POST['csrf_token'] ?? '')){
                 $_SESSION['erro_flash'] = 'Sessão expirada. Tente novamente.';
-                header("Location: ?url=troca/minhas");
-                exit;
+                $this->redirect('troca/minhas');
+                return;
             }
         }
 
@@ -234,79 +215,145 @@ class ControladorTroca extends Controlador {
         $mensagemModel = new Mensagem();
         $mensagemModel->enviar($troca_id, $usuario_id, $mensagem);
 
-        header("Location: ?url=troca/chat/" . $troca_id);
+        $this->redirect('troca/chat/' . $troca_id);
     }
 
     /* ============================
-       CONFIRMAR TROCA (com proteção total)
+       ✅ CONFIRMAR TROCA (CORRIGIDO - USA transferirBilateral)
     ============================ */
-        public function confirmar($troca_id){
+    /* ============================
+   ✅ CONFIRMAR TROCA (CORRIGIDO)
+============================ */
+public function confirmar($troca_id){
+
+    $this->auth();
+
+    require_once "../app/modelos/Scoin.php";
+    require_once "../app/modelos/Usuario.php";
+    require_once "../app/modelos/Notificacao.php";
+    require_once "../configuracao/banco.php";
+
+    $usuario_id = $_SESSION['usuario_id'];
+
+    $trocaModel = new Troca();
+    $finalizada = $trocaModel->confirmar($troca_id, $usuario_id);
+
+    if($finalizada){
+
+        $troca = $trocaModel->buscarPorId($troca_id);
+        $scoin = new Scoin();
+        $usuarioModel = new Usuario();
+        $notif = new Notificacao();
+
+        $valor = (float)($troca['valor_scoins'] ?? 10);
+
+        // ✅ Validação
+        if($valor <= 0){
+            $_SESSION['erro_flash'] = 'Valor inválido para troca.';
+            $this->redirect('troca/chat/' . $troca_id);
+            return;
+        }
+
+        try {
+            // ✅ 1. DESBLOQUEAR saldo (CRÍTICO!)
+            $banco = new Banco();
+            $conn = $banco->conectar();
+            
+            $sqlDesbloquear = "UPDATE usuarios 
+                              SET saldo_bloqueado = GREATEST(saldo_bloqueado - :valor, 0) 
+                              WHERE id = :id";
+            $stmtDesbloquear = $conn->prepare($sqlDesbloquear);
+            $stmtDesbloquear->bindParam(":valor", $valor);
+            $stmtDesbloquear->bindParam(":id", $troca['usuario_origem_id'], PDO::PARAM_INT);
+            
+            if(!$stmtDesbloquear->execute()){
+                throw new Exception("Erro ao desbloquear saldo");
+            }
+
+            // ✅ 2. TRANSFERÊNCIA BILATERAL (ATÔMICA)
+            $sucesso = $scoin->transferirBilateral(
+                $troca['usuario_origem_id'],
+                $troca['usuario_destino_id'],
+                $troca_id,
+                $valor,
+                $valor,
+                'Troca de serviços finalizada'
+            );
+
+            if ($sucesso) {
+                // ✅ 3. Recalcular níveis
+                $usuarioModel->recalcularNivel($troca['usuario_origem_id']);
+                $usuarioModel->recalcularNivel($troca['usuario_destino_id']);
+
+                // ✅ 4. Notificar ambos
+                $notif->criar(
+                    $troca['usuario_origem_id'],
+                    "✅ Troca finalizada! Você recebeu {$valor} SCoins.",
+                    "?url=troca/chat/" . $troca_id
+                );
+
+                $notif->criar(
+                    $troca['usuario_destino_id'],
+                    "✅ Troca finalizada! Você recebeu {$valor} SCoins.",
+                    "?url=troca/chat/" . $troca_id
+                );
+
+                $_SESSION['sucesso_flash'] = "✅ Troca finalizada! Ambos receberam {$valor} SCoins!";
+            } else {
+                throw new Exception("Erro ao processar transferência bilateral");
+            }
+
+        } catch (Exception $e) {
+            error_log("Erro ao confirmar troca: " . $e->getMessage());
+            $_SESSION['erro_flash'] = 'Erro ao processar a troca: ' . $e->getMessage();
+        }
+    }
+
+    $this->redirect('troca/chat/' . $troca_id);
+}
+
+    /* ============================
+       ✅ AVALIAR (CORRIGIDO - COM VALIDAÇÕES)
+    ============================ */
+    public function avaliar($troca_id){
 
         $this->auth();
-
-        require_once "../app/modelos/Scoin.php";
-        require_once "../app/modelos/Usuario.php";
 
         $usuario_id = $_SESSION['usuario_id'];
 
         $trocaModel = new Troca();
+        $troca = $trocaModel->buscarPorId($troca_id);
 
-        $finalizada = $trocaModel->confirmar($troca_id, $usuario_id);
-
-        // Ambos confirmaram E nunca foi creditado antes
-        if($finalizada){
-
-            $troca = $trocaModel->buscarPorId($troca_id);
-            $scoin = new Scoin();
-            $usuarioModel = new Usuario();
-
-            $valor = (float)($troca['valor_scoins'] ?? 10);
-
-            // 1. Desbloquear saldo do proponente (origem)
-            $sqlDesbloqueio = "UPDATE usuarios SET saldo_bloqueado = GREATEST(saldo_bloqueado - :valor, 0) WHERE id = :id";
-            $banco = new Banco();
-            $conn = $banco->conectar();
-            $stmt = $conn->prepare($sqlDesbloqueio);
-            $stmt->bindParam(":valor", $valor);
-            $stmt->bindParam(":id", $troca['usuario_origem_id']);
-            $stmt->execute();
-
-            // 2. Debitar do proponente (origem)
-            $scoin->debitar($troca['usuario_origem_id'], $troca_id, $valor, 'Pagamento de troca finalizada');
-
-            // 3. Creditar para o prestador (destino)
-            $scoin->creditar($troca['usuario_destino_id'], $troca_id, $valor, 'Recebimento de troca finalizada');
-
-            // 4. Recalcular nível de ambos
-            $usuarioModel->recalcularNivel($troca['usuario_origem_id']);
-            $usuarioModel->recalcularNivel($troca['usuario_destino_id']);
-
-            // 5. Verificar padrão suspeito
-            if($usuarioModel->verificarPadraoSuspeito($troca['usuario_origem_id'])){
-                // Log para admin (futuro: bloquear automaticamente)
-                error_log("ALERTA ANTI-FRAUDE: Padrão suspeito detectado para usuário ID " . $troca['usuario_origem_id']);
-            }
+        // Validações
+        if(!$troca){
+            $_SESSION['erro_flash'] = 'Troca não encontrada.';
+            $this->redirect('troca/minhas');
+            return;
         }
 
-        header("Location: ?url=troca/chat/" . $troca_id);
-    }
+        // Só pode avaliar se finalizou
+        if($troca['status'] !== 'FINALIZADA'){
+            $_SESSION['erro_flash'] = 'Esta troca não pode ser avaliada neste momento.';
+            $this->redirect('troca/minhas');
+            return;
+        }
 
-    /* ============================
-       AVALIAR
-    ============================ */
-        public function avaliar($troca_id){
-
-        $this->auth();
-
-        $trocaModel = new Troca();
-        $troca = $trocaModel->buscarPorId($troca_id);
+        // Só pode avaliar se participou
+        if($troca['usuario_origem_id'] != $usuario_id && $troca['usuario_destino_id'] != $usuario_id){
+            $_SESSION['erro_flash'] = 'Você não pode avaliar esta troca.';
+            $this->redirect('troca/minhas');
+            return;
+        }
 
         require_once "../app/views/layout/cabecalho.php";
         require_once "../app/views/trocas/avaliar.php";
         require_once "../app/views/layout/rodape.php";
     }
 
-        public function salvarAvaliacao(){
+    /* ============================
+       ✅ SALVAR AVALIAÇÃO (NOVO - COM VALIDAÇÕES)
+    ============================ */
+    public function salvarAvaliacao(){
 
         $this->auth();
         
@@ -314,24 +361,59 @@ class ControladorTroca extends Controlador {
             require_once "../nucleo/Seguranca.php";
             if(!Seguranca::validarCsrf($_POST['csrf_token'] ?? '')){
                 $_SESSION['erro_flash'] = 'Sessão expirada. Tente novamente.';
-                header("Location: ?url=troca/minhas");
-                exit;
+                $this->redirect('troca/minhas');
+                return;
             }
         }
 
         require_once "../app/modelos/Avaliacao.php";
+        require_once "../app/modelos/Troca.php";
 
-        $troca_id = $_POST['troca_id'];
-        $nota = $_POST['nota'];
-        $comentario = $_POST['comentario'];
+        $usuario_id = $_SESSION['usuario_id'];
+        $troca_id = (int)$_POST['troca_id'];
+        $nota = (int)$_POST['nota'];
+        $comentario = trim($_POST['comentario'] ?? '');
+        $avaliado = (int)$_POST['avaliado_id'];
 
-        $avaliador = $_SESSION['usuario_id'];
-        $avaliado = $_POST['avaliado_id'];
+        // ✅ Validações
+        if($nota < 1 || $nota > 5){
+            $_SESSION['erro_flash'] = 'Nota inválida (deve ser entre 1 e 5).';
+            $this->redirect('troca/minhas');
+            return;
+        }
 
+        $trocaModel = new Troca();
+        $troca = $trocaModel->buscarPorId($troca_id);
+
+        if(!$troca){
+            $_SESSION['erro_flash'] = 'Troca não encontrada.';
+            $this->redirect('troca/minhas');
+            return;
+        }
+
+        if($troca['status'] !== 'FINALIZADA'){
+            $_SESSION['erro_flash'] = 'Troca não pode ser avaliada neste momento.';
+            $this->redirect('troca/minhas');
+            return;
+        }
+
+        if($troca['usuario_origem_id'] != $usuario_id && $troca['usuario_destino_id'] != $usuario_id){
+            $_SESSION['erro_flash'] = 'Você não pode avaliar esta troca.';
+            $this->redirect('troca/minhas');
+            return;
+        }
+
+        // ✅ Salvar avaliação
         $model = new Avaliacao();
-        $model->salvar($troca_id, $avaliador, $avaliado, $nota, $comentario);
+        $resultado = $model->salvar($troca_id, $usuario_id, $avaliado, $nota, $comentario);
 
-        header("Location: ?url=troca/minhas");
+        if($resultado){
+            $_SESSION['sucesso_flash'] = '⭐ Avaliação registrada com sucesso!';
+        } else {
+            $_SESSION['erro_flash'] = 'Erro ao registrar avaliação. Tente novamente.';
+        }
+
+        $this->redirect('troca/minhas');
     }
 
     /* ============================

@@ -105,6 +105,9 @@ if($foto){
     $stmtFoto->execute();
 }
 
+// ✅ CORREÇÃO: RETORNAR O ID DO SERVIÇO CRIADO
+return $servico_id;
+
 }
 
 
@@ -461,12 +464,5 @@ public function buscarFotos($servico_id)
 
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
-
-
-
-    
-
-
-
 
 }

@@ -34,54 +34,66 @@ class ControladorComunidade extends Controlador {
         require_once "../app/views/layout/rodape.php";
     }
 
-public function postar(){
+    public function postar(){
 
-    $this->auth();
+        $this->auth();
 
-    if($_SERVER['REQUEST_METHOD'] === 'POST'){
-        require_once "../nucleo/Seguranca.php";
-        if(!Seguranca::validarCsrf($_POST['csrf_token'] ?? '')){
-            $_SESSION['erro_flash'] = 'Sessão expirada. Tente novamente.';
-            header("Location: ?url=comunidade");
-            exit;
-        }
-        $texto   = trim($_POST['texto'] ?? '');
-        $imagem  = null;
-        $video   = null;
-        $usuario = $_SESSION['usuario_id'];
-        $servico_id = !empty($_POST['servico_id']) ? $_POST['servico_id'] : null;
-        $tipo_post  = !empty($_POST['tipo_post']) ? $_POST['tipo_post'] : 'DICA';
-
-        if(empty($texto)){
-            header("Location: ?url=comunidade");
-            exit;
-        }
-
-        // Upload de imagem (opcional)
-        if(!empty($_FILES['imagem']['tmp_name'])){
+        if($_SERVER['REQUEST_METHOD'] === 'POST'){
             require_once "../nucleo/Seguranca.php";
-            $uploadDir = ROOT . '/uploads/comunidade/';
-            if (!is_dir($uploadDir)) @mkdir($uploadDir, 0755, true);
-            $imagem = Seguranca::uploadSeguro($_FILES['imagem']['tmp_name'], $uploadDir, ['image/jpeg','image/png','image/webp','image/gif']);
-            if(!$imagem) { $imagem = null; }
+            if(!Seguranca::validarCsrf($_POST['csrf_token'] ?? '')){
+                $_SESSION['erro_flash'] = 'Sessão expirada. Tente novamente.';
+                $this->redirect('comunidade');
+                return;
+            }
+            $texto   = trim($_POST['texto'] ?? '');
+            $imagem  = null;
+            $video   = null;
+            $usuario = $_SESSION['usuario_id'];
+            $servico_id = !empty($_POST['servico_id']) ? (int)$_POST['servico_id'] : null;
+            $tipo_post  = !empty($_POST['tipo_post']) ? $_POST['tipo_post'] : 'DICA';
+
+            // ✅ VALIDAÇÃO: tipo_post é válido
+            if (!in_array($tipo_post, ['OFERECENDO', 'PROCURANDO', 'DICA'])) {
+                $tipo_post = 'DICA';
+            }
+
+            if(empty($texto)){
+                $_SESSION['erro_flash'] = 'O texto da publicação não pode estar vazio.';
+                $this->redirect('comunidade');
+                return;
+            }
+
+            // Upload de imagem (opcional)
+            if(!empty($_FILES['imagem']['tmp_name'])){
+                require_once "../nucleo/Seguranca.php";
+                $uploadDir = ROOT . '/uploads/comunidade/';  // ✅ CORRIGIDO: ROOT em vez de ../
+                if (!is_dir($uploadDir)) @mkdir($uploadDir, 0755, true);
+                $imagem = Seguranca::uploadSeguro($_FILES['imagem']['tmp_name'], $uploadDir, ['image/jpeg','image/png','image/webp','image/gif']);
+                if(!$imagem) { $imagem = null; }
+            }
+
+            // Upload de vídeo (opcional)
+            if(!empty($_FILES['video']['tmp_name'])){
+                require_once "../nucleo/Seguranca.php";
+                $uploadDir = ROOT . '/uploads/comunidade/';  // ✅ CORRIGIDO: ROOT em vez de ../
+                if (!is_dir($uploadDir)) @mkdir($uploadDir, 0755, true);
+                $video = Seguranca::uploadSeguro($_FILES['video']['tmp_name'], $uploadDir, ['video/mp4','video/webm']);
+                if(!$video) { $video = null; }
+            }
+
+            $comunidadeModel = new Comunidade();
+            $post_id = $comunidadeModel->criarPost($usuario, $texto, $imagem, $video, $servico_id, $tipo_post);
+
+            if ($post_id) {
+                $_SESSION['sucesso_flash'] = 'Publicação criada com sucesso! 🎉';
+            } else {
+                $_SESSION['erro_flash'] = 'Erro ao criar publicação. Tente novamente.';
+            }
         }
 
-        // Upload de vídeo (opcional)
-        if(!empty($_FILES['video']['tmp_name'])){
-            require_once "../nucleo/Seguranca.php";
-            $uploadDir = ROOT . '/uploads/comunidade/';
-            if (!is_dir($uploadDir)) @mkdir($uploadDir, 0755, true);
-            $video = Seguranca::uploadSeguro($_FILES['video']['tmp_name'], $uploadDir, ['video/mp4','video/webm']);
-            if(!$video) { $video = null; }
-        }
+        $this->redirect('comunidade');
 
-        $comunidadeModel = new Comunidade();
-        $comunidadeModel->criarPost($usuario, $texto, $imagem, $video, $servico_id, $tipo_post);
     }
-
-    header("Location: ?url=comunidade");
-    exit;
-}
 
     public function curtir($id){
 
@@ -102,8 +114,8 @@ public function postar(){
             }
         }
 
-        header("Location: ?url=comunidade");
-        exit;
+        $this->redirect('comunidade');
+
     }
 
     public function comentar($id){
@@ -114,28 +126,40 @@ public function postar(){
             require_once "../nucleo/Seguranca.php";
             if(!Seguranca::validarCsrf($_POST['csrf_token'] ?? '')){
                 $_SESSION['erro_flash'] = 'Sessão expirada. Tente novamente.';
-                header("Location: ?url=comunidade");
-                exit;
+                $this->redirect('comunidade');
+                return;
             }
             
             $texto = trim($_POST['texto'] ?? '');
 
             if(!empty($texto)){
                 $comunidadeModel = new Comunidade();
+                
+                // ✅ VALIDAÇÃO: Verifica se post existe antes de comentar
+                $post = $comunidadeModel->buscarPostPorId($id);
+                if (!$post) {
+                    $_SESSION['erro_flash'] = 'Publicação não encontrada.';
+                    $this->redirect('comunidade');
+                    return;
+                }
+
                 $comunidadeModel->comentar($id, $_SESSION['usuario_id'], $texto);
 
-                $post = $comunidadeModel->buscarPostPorId($id);
                 if ($post && $post['usuario_id'] != $_SESSION['usuario_id']) {
                     require_once "../app/modelos/Notificacao.php";
                     $notificacaoModel = new Notificacao();
                     $minhaSessaoNome = $_SESSION['usuario_nome'] ?? 'Alguém';
                     $notificacaoModel->criar($post['usuario_id'], "{$minhaSessaoNome} comentou na sua publicação.", "?url=comunidade#post-{$id}");
                 }
+
+                $_SESSION['sucesso_flash'] = 'Comentário adicionado! 👍';
+            } else {
+                $_SESSION['erro_flash'] = 'O comentário não pode estar vazio.';
             }
         }
 
-        header("Location: ?url=comunidade");
-        exit;
+        $this->redirect('comunidade');
+
     }
 
     public function editar($id){
@@ -146,19 +170,27 @@ public function postar(){
             require_once "../nucleo/Seguranca.php";
             if(!Seguranca::validarCsrf($_POST['csrf_token'] ?? '')){
                 $_SESSION['erro_flash'] = 'Sessão expirada. Tente novamente.';
-                header("Location: ?url=comunidade");
-                exit;
+                $this->redirect('comunidade');
+                return;
             }
             $texto = trim($_POST['texto'] ?? '');
 
             if(!empty($texto)){
                 $comunidadeModel = new Comunidade();
-                $comunidadeModel->editarPost($id, $_SESSION['usuario_id'], $texto);
+                $resultado = $comunidadeModel->editarPost($id, $_SESSION['usuario_id'], $texto);
+                
+                if ($resultado) {
+                    $_SESSION['sucesso_flash'] = 'Publicação atualizada com sucesso! ✏️';
+                } else {
+                    $_SESSION['erro_flash'] = 'Você não tem permissão para editar esta publicação.';
+                }
+            } else {
+                $_SESSION['erro_flash'] = 'O texto não pode estar vazio.';
             }
         }
 
-        header("Location: ?url=comunidade");
-        exit;
+        $this->redirect('comunidade');
+
     }
 
     public function excluir($id){
@@ -169,26 +201,33 @@ public function postar(){
             require_once "../nucleo/Seguranca.php";
             if(!Seguranca::validarCsrf($_POST['csrf_token'] ?? '')){
                 $_SESSION['erro_flash'] = 'Sessão expirada. Tente novamente.';
-                header("Location: ?url=comunidade");
-                exit;
+                $this->redirect('comunidade');
+                return;
             }
             $comunidadeModel = new Comunidade();
-            $comunidadeModel->excluirPost($id, $_SESSION['usuario_id']);
+            $resultado = $comunidadeModel->excluirPost($id, $_SESSION['usuario_id']);
+            
+            if ($resultado) {
+                $_SESSION['sucesso_flash'] = 'Publicação excluída com sucesso! 🗑️';
+            } else {
+                $_SESSION['erro_flash'] = 'Você não tem permissão para excluir esta publicação.';
+            }
         }
 
-        header("Location: ?url=comunidade");
-        exit;
+        $this->redirect('comunidade');
+
     }
 
     public function gorjeta($post_id){
+
         $this->auth();
         
         if($_SERVER['REQUEST_METHOD'] === 'POST'){
             require_once "../nucleo/Seguranca.php";
             if(!Seguranca::validarCsrf($_POST['csrf_token'] ?? '')){
                 $_SESSION['erro_flash'] = 'Sessão expirada. Tente novamente.';
-                header("Location: ?url=comunidade");
-                exit;
+                $this->redirect('comunidade');
+                return;
             }
             $valor = floatval($_POST['valor'] ?? 5);
             
@@ -206,12 +245,21 @@ public function postar(){
                         $notificacaoModel = new Notificacao();
                         $minhaSessaoNome = $_SESSION['usuario_nome'] ?? 'Alguém';
                         $notificacaoModel->criar($post['usuario_id'], "Você recebeu {$valor} SCoins de gorjeta de {$minhaSessaoNome} em uma publicação!", "?url=comunidade#post-{$post_id}");
+                        
+                        $_SESSION['sucesso_flash'] = 'Gorjeta enviada com sucesso! 💰';
+                    } else {
+                        $_SESSION['erro_flash'] = 'Saldo insuficiente para enviar gorjeta.';
                     }
+                } else {
+                    $_SESSION['erro_flash'] = 'Você não pode enviar gorjeta para sua própria publicação.';
                 }
+            } else {
+                $_SESSION['erro_flash'] = 'O valor da gorjeta deve ser maior que 0.';
             }
         }
-        header("Location: ?url=comunidade");
-        exit;
+
+        $this->redirect('comunidade');
+
     }
 
     // ─── CURTIR VIA AJAX (retorna JSON) ───────────────────────────
@@ -231,12 +279,21 @@ public function postar(){
         }
 
         try {
+            $id = (int)$id;
+
+            // ✅ VALIDAÇÃO: Verifica se post existe
             $comunidadeModel = new Comunidade();
+            $post = $comunidadeModel->buscarPostPorId($id);
+            
+            if (!$post) {
+                echo json_encode(['ok' => false, 'msg' => 'Publicação não encontrada']);
+                exit;
+            }
+
             $jaCurtiu = $comunidadeModel->usuarioCurtiu($id, $_SESSION['usuario_id']);
             $comunidadeModel->curtir($id, $_SESSION['usuario_id']);
 
             if (!$jaCurtiu) {
-                $post = $comunidadeModel->buscarPostPorId($id);
                 if ($post && $post['usuario_id'] != $_SESSION['usuario_id']) {
                     require_once "../app/modelos/Notificacao.php";
                     $notif = new Notificacao();
