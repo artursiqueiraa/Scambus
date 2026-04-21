@@ -1,0 +1,10 @@
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Permite acesso direto à pasta uploads (fotos de serviços e perfis)
+    RewriteRule ^uploads/ - [L]
+
+    # Redireciona tudo para a pasta public/
+    RewriteRule ^$ public/ [L]
+    RewriteRule (.*) public/$1 [L]
+</IfModule>

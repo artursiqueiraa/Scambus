@@ -1,0 +1,390 @@
+<?php
+
+require_once "../app/modelos/Servico.php";
+require_once "../nucleo/Sessao.php";
+
+class ControladorServico extends Controlador {
+
+    // Proteção via $this->auth()
+
+    public function criar(){
+        $this->auth();
+        require_once "../app/views/layout/cabecalho.php";
+        require_once "../app/views/servicos/criar.php";
+        require_once "../app/views/layout/rodape.php";
+    }
+
+    public function salvar(){
+        $this->auth();
+        if($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            header("Location: ?url=servico/criar");
+            exit;
+        }
+        require_once "../nucleo/Seguranca.php";
+        if(!Seguranca::validarCsrf($_POST['csrf_token'] ?? '')){
+            $_SESSION['erro_flash'] = 'Sessão expirada. Tente novamente.';
+            header("Location: ?url=servico/criar");
+            exit;
+        }
+
+        $usuario_id = $_SESSION['usuario_id'];
+
+        $categoria = $_POST['categoria_id'];
+
+        $titulo = $_POST['titulo'];
+        $oferece = $_POST['oferece'];
+        $aceita = $_POST['aceita'];
+
+        $fotoNome = null;
+
+        if(!empty($_FILES['foto']['tmp_name'])){
+            require_once "../nucleo/Seguranca.php";
+            $uploadDir = ROOT . '/uploads/servicos/';
+            if (!is_dir($uploadDir)) @mkdir($uploadDir, 0755, true);
+            $fotoNome = Seguranca::uploadSeguro($_FILES['foto']['tmp_name'], $uploadDir, ['image/jpeg', 'image/png', 'image/webp']);
+            if (!$fotoNome) { $fotoNome = null; }
+        }
+
+        $servico = new Servico();
+
+$servico->criar($usuario_id,$categoria,$titulo,$oferece,$aceita,null);
+
+// ✅ CORREÇÃO: usa a mesma conexão interna do modelo (lastInsertId retornava 0 antes)
+$conexao = $servico->getConexao();
+$servico_id = $conexao->lastInsertId();
+
+
+// 🔥 SALVAR VÁRIAS IMAGENS
+if(!empty($_FILES['fotos']['tmp_name'][0])){
+    require_once "../nucleo/Seguranca.php";
+    $uploadDir = ROOT . '/uploads/servicos/';
+    if (!is_dir($uploadDir)) @mkdir($uploadDir, 0755, true);
+    foreach($_FILES['fotos']['tmp_name'] as $key => $tmp_name){
+        if(empty($tmp_name)) continue;
+        $nomeArquivo = Seguranca::uploadSeguro($tmp_name, $uploadDir, ['image/jpeg', 'image/png', 'image/webp']);
+        
+        if($nomeArquivo){
+
+        $sql = "INSERT INTO servico_fotos (servico_id, caminho_foto)
+                VALUES (:servico, :foto)";
+
+        $stmt = $conexao->prepare($sql);
+
+        $stmt->bindParam(":servico", $servico_id);
+        $stmt->bindParam(":foto", $nomeArquivo);
+
+        $stmt->execute();
+        } // fecha if($nomeArquivo)
+    }
+}
+
+        // 🔥 Redireciona para a página do serviço após salvar
+        header("Location: ?url=servico/ver/".$servico_id);
+        exit;
+
+    }
+
+
+    public function ver($id){
+
+        $servicoModel = new Servico();
+
+$servico = $servicoModel->buscarPorId($id);
+
+// 🔥 NOVO
+$fotos = $servicoModel->buscarFotos($id);
+
+require_once "../app/views/layout/cabecalho.php";
+require_once "../app/views/servicos/ver.php";
+require_once "../app/views/layout/rodape.php";
+
+    }
+
+  public function editar($id){
+    $this->auth();
+$servicoModel = new Servico();
+
+$servico = $servicoModel->buscarPorId($id);
+
+/*
+verifica se serviço existe
+*/
+
+if(!$servico){
+
+echo "Serviço não encontrado.";
+return;
+
+}
+
+/*
+proteção de segurança
+somente dono pode editar
+*/
+
+if($servico['usuario_id'] != $_SESSION['usuario_id']){
+
+echo "Você não tem permissão para editar este serviço.";
+return;
+
+}
+
+require_once "../app/views/layout/cabecalho.php";
+require_once "../app/views/servicos/editar.php";
+require_once "../app/views/layout/rodape.php";
+
+}
+
+
+
+
+    /*
+    PROPOR TROCA — Redireciona para ControladorTroca::propor
+    que agora possui o fluxo completo com Escrow e anti-fraude
+    */
+    public function proporTroca($servico_id){
+
+        header("Location: ?url=troca/propor/" . $servico_id);
+        exit;
+
+    }
+
+
+    public function listar(){
+
+        $model = new Servico();
+
+        $servicos = $model->listarTodos();
+
+        require_once "../app/views/layout/cabecalho.php";
+        require_once "../app/views/servicos/listar.php";
+        require_once "../app/views/layout/rodape.php";
+
+    }
+
+
+    public function buscar(){
+
+        $termo = $_GET['q'] ?? '';
+
+        $servicoModel = new Servico();
+
+        $servicos = $servicoModel->buscar($termo);
+
+        require_once "../app/views/layout/cabecalho.php";
+        require_once "../app/views/servicos/listar.php";
+        require_once "../app/views/layout/rodape.php";
+
+    }
+
+
+    public function categoria($id){
+
+        $servicoModel = new Servico();
+
+        $servicos = $servicoModel->listarPorCategoria($id);
+
+        require_once "../app/views/layout/cabecalho.php";
+        require_once "../app/views/servicos/listar.php";
+        require_once "../app/views/layout/rodape.php";
+
+    }
+
+    public function status($id){
+
+$servicoModel = new Servico();
+
+$servico = $servicoModel->buscarPorId($id);
+
+if(!$servico){
+
+echo "Serviço não encontrado.";
+return;
+
+}
+
+/*
+proteção: somente dono
+*/
+
+if($servico['usuario_id'] != $_SESSION['usuario_id']){
+
+echo "Acesso negado.";
+return;
+
+}
+
+/*
+alterna status
+*/
+
+$novoStatus = ($servico['status'] == 'ATIVO') ? 'INATIVO' : 'ATIVO';
+
+$servicoModel->alterarStatus($id,$novoStatus);
+
+header("Location: ?url=servico/ver/".$id);
+
+}
+
+
+    public function atualizar(){
+        if($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            header("Location: ?url=servico/meus");
+            exit;
+        }
+        require_once "../nucleo/Seguranca.php";
+        if(!Seguranca::validarCsrf($_POST['csrf_token'] ?? '')){
+            $_SESSION['erro_flash'] = 'Sessão expirada. Tente novamente.';
+            header("Location: ?url=servico/meus");
+            exit;
+        }
+
+$id = $_POST['id'];
+
+$servicoModel = new Servico();
+
+/*
+buscar serviço
+*/
+
+$servico = $servicoModel->buscarPorId($id);
+
+/*
+verifica se serviço existe
+*/
+
+if(!$servico){
+
+echo "Serviço não encontrado.";
+return;
+
+}
+
+/*
+proteção de segurança
+somente dono pode editar
+*/
+
+if($servico['usuario_id'] != $_SESSION['usuario_id']){
+
+echo "Acesso negado.";
+return;
+
+}
+
+$categoria = $_POST['categoria_id'];
+$titulo = $_POST['titulo'];
+$oferece = $_POST['oferece'];
+$aceita = $_POST['aceita'];
+
+$fotoNome = null;
+
+if(!empty($_FILES['foto']['tmp_name'])){
+    require_once "../nucleo/Seguranca.php";
+    $uploadDir = ROOT . '/uploads/servicos/';
+    if (!is_dir($uploadDir)) @mkdir($uploadDir, 0755, true);
+    $nomeArq = Seguranca::uploadSeguro($_FILES['foto']['tmp_name'], $uploadDir, ['image/jpeg', 'image/png', 'image/webp']);
+    if($nomeArq) {
+        $fotoNome = $nomeArq;
+    }
+}
+
+$servicoModel->atualizar(
+$id,
+$categoria,
+$titulo,
+$oferece,
+$aceita,
+$fotoNome
+);
+
+header("Location: ?url=servico/ver/".$id);
+
+}
+
+public function favorito($id){
+    $this->auth();
+$usuario = $_SESSION['usuario_id'];
+
+$servicoModel = new Servico();
+
+$servicoModel->favoritar($usuario,$id);
+
+header("Location: ?url=servico/ver/".$id);
+
+}
+
+
+public function meus(){
+
+    $this->auth();
+
+    $model = new Servico();
+
+    $servicos = $model->listarPorUsuario($_SESSION['usuario_id']);
+
+    require_once "../app/views/layout/cabecalho.php";
+    require_once "../app/views/servicos/meus.php";
+    require_once "../app/views/layout/rodape.php";
+}
+
+
+public function alterarStatus($id, $status)
+{
+    require_once "../nucleo/Seguranca.php";
+    if($_SERVER['REQUEST_METHOD'] === 'POST' || $_SERVER['REQUEST_METHOD'] === 'GET'){
+        if(isset($_POST['csrf_token']) || isset($_GET['csrf_token'])) {
+            $token = $_POST['csrf_token'] ?? $_GET['csrf_token'] ?? '';
+            if(!Seguranca::validarCsrf($token)){
+                die("CSRF detectado na tentativa de status.");
+            }
+        }
+    }
+    
+    require_once "../app/modelos/Servico.php";
+
+    $servico = new Servico();
+
+    // Segurança: só dono pode alterar
+    $dados = $servico->buscarPorId($id);
+
+    if($dados['usuario_id'] != $_SESSION['usuario_id']){
+        die("Acesso negado");
+    }
+
+    $servico->alterarStatus($id, $status);
+
+    header("Location: ?url=servico/ver/$id");
+}
+
+
+public function excluir($id)
+{
+    $this->auth();
+    if($_SERVER['REQUEST_METHOD'] === 'POST') {
+        require_once "../nucleo/Seguranca.php";
+        if(!Seguranca::validarCsrf($_POST['csrf_token'] ?? '')){
+            $_SESSION['erro_flash'] = 'Sessão expirada. Tente novamente.';
+            header("Location: ?url=servico/meus");
+            exit;
+        }
+    }
+    
+    require_once "../app/modelos/Servico.php";
+
+    $servico = new Servico();
+
+    // Segurança
+    $dados = $servico->buscarPorId($id);
+
+    if($dados['usuario_id'] != $_SESSION['usuario_id']){
+        die("Acesso negado");
+    }
+
+    $servico->excluir($id);
+
+    header("Location: ?url=servico/meus");
+}
+
+
+} 
